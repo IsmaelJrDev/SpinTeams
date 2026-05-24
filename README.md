@@ -4,6 +4,23 @@ Servicio de autenticación con soporte para registro/login manual (email + passw
 
 ---
 
+## Contenido
+
+- [Stack](#stack)
+- [Estructura del proyecto](#estructura-del-proyecto)
+- [Variables de entorno](#variables-de-entorno)
+- [Instalación y arranque](#instalación-y-arranque)
+- [Endpoints](#endpoints)
+- [Descripción de archivos](#descripción-de-archivos)
+- [Flujo: Auth local](#flujo-auth-local-email--password)
+- [Flujo: Google OAuth 2.0](#flujo-google-oauth-20)
+- [Los tres escenarios de Google OAuth](#los-tres-escenarios-de-google-oauth)
+- [Modelo de usuario en MongoDB](#modelo-de-usuario-en-mongodb)
+- [Probar con Postman](#probar-con-postman)
+- [Notas de seguridad](#notas-de-seguridad)
+
+---
+
 ## Stack
 
 | Tecnología | Uso |
@@ -312,139 +329,93 @@ Define y agrupa todas las rutas del servicio. Aplica el middleware `verifyToken`
 
 ## Flujo: Auth local (email + password)
 
-```
-┌─────────┐                        ┌───────────┐                  ┌──────────┐
-│ Cliente │                        │  Backend  │                  │ MongoDB  │
-└────┬────┘                        └─────┬─────┘                  └────┬─────┘
-     │                                   │                              │
-     │  POST /register                   │                              │
-     │  { email, password, nombre }      │                              │
-     │ ────────────────────────────────► │                              │
-     │                                   │  findOne({ email })          │
-     │                                   │ ────────────────────────────►│
-     │                                   │  null (no existe)            │
-     │                                   │ ◄────────────────────────────│
-     │                                   │                              │
-     │                                   │  pre-save middleware         │
-     │                                   │  bcrypt.hash(password)       │
-     │                                   │                              │
-     │                                   │  User.create(...)            │
-     │                                   │ ────────────────────────────►│
-     │                                   │  usuario guardado            │
-     │                                   │ ◄────────────────────────────│
-     │                                   │                              │
-     │                                   │  jwt.sign({ id: user._id })  │
-     │                                   │                              │
-     │  { token, user }                  │                              │
-     │ ◄────────────────────────────────  │                              │
-     │                                   │                              │
-     │  POST /login                      │                              │
-     │  { email, password }              │                              │
-     │ ────────────────────────────────► │                              │
-     │                                   │  findOne({ email })          │
-     │                                   │ ────────────────────────────►│
-     │                                   │  usuario encontrado          │
-     │                                   │ ◄────────────────────────────│
-     │                                   │                              │
-     │                                   │  bcrypt.compare(             │
-     │                                   │    passwordIngresada,        │
-     │                                   │    user.passwordHash         │
-     │                                   │  )  → true                   │
-     │                                   │                              │
-     │                                   │  jwt.sign({ id: user._id })  │
-     │                                   │                              │
-     │  { token, user }                  │                              │
-     │ ◄────────────────────────────────  │                              │
-     │                                   │                              │
-     │  GET /me                          │                              │
-     │  Authorization: Bearer <token>    │                              │
-     │ ────────────────────────────────► │                              │
-     │                                   │  verifyToken middleware       │
-     │                                   │  jwt.verify(token)           │
-     │                                   │  findById(decoded.id)        │
-     │                                   │ ────────────────────────────►│
-     │                                   │  usuario                     │
-     │                                   │ ◄────────────────────────────│
-     │                                   │                              │
-     │  { user }                         │                              │
-     │ ◄────────────────────────────────  │                              │
+```mermaid
+sequenceDiagram
+    actor Cliente
+    participant Backend
+    participant MongoDB
+
+    Note over Cliente,MongoDB: REGISTRO
+
+    Cliente->>Backend: POST /api/auth/register<br/>{ email, password, nombre }
+    Backend->>MongoDB: findOne({ email })
+    MongoDB-->>Backend: null (no existe)
+    Note over Backend: pre-save middleware<br/>bcrypt.hash(password)
+    Backend->>MongoDB: User.create({ email, passwordHash, nombre })
+    MongoDB-->>Backend: usuario guardado
+    Note over Backend: jwt.sign({ id: user._id })
+    Backend-->>Cliente: 201 { token, user }
+
+    Note over Cliente,MongoDB: LOGIN
+
+    Cliente->>Backend: POST /api/auth/login<br/>{ email, password }
+    Backend->>MongoDB: findOne({ email })
+    MongoDB-->>Backend: usuario encontrado
+    Note over Backend: bcrypt.compare(password, passwordHash) → true
+    Note over Backend: jwt.sign({ id: user._id })
+    Backend-->>Cliente: 200 { token, user }
+
+    Note over Cliente,MongoDB: RUTA PROTEGIDA
+
+    Cliente->>Backend: GET /api/auth/me<br/>Authorization: Bearer token
+    Note over Backend: verifyToken middleware<br/>jwt.verify(token)
+    Backend->>MongoDB: findById(decoded.id)
+    MongoDB-->>Backend: usuario
+    Backend-->>Cliente: 200 { user }
 ```
 
 ---
 
 ## Flujo: Google OAuth 2.0
 
-```
-┌─────────┐       ┌───────────┐       ┌─────────────┐       ┌──────────┐
-│ Browser │       │  Backend  │       │   Passport  │       │  Google  │
-└────┬────┘       └─────┬─────┘       └──────┬──────┘       └────┬─────┘
-     │                  │                    │                    │
-     │ GET /auth/google │                    │                    │
-     │ ───────────────► │                    │                    │
-     │                  │ authenticate()     │                    │
-     │                  │ ──────────────────►│                    │
-     │                  │                    │ redirect a Google  │
-     │ ◄───────────────────────────────────────────────────────── │
-     │                  │                    │                    │
-     │  usuario ve pantalla de Google        │                    │
-     │  y acepta los permisos                │                    │
-     │ ──────────────────────────────────────────────────────────►│
-     │                  │                    │                    │
-     │                  │ GET /callback      │                    │
-     │                  │ ?code=xxx          │                    │
-     │                  │ ◄──────────────────────────────────────  │
-     │                  │                    │                    │
-     │                  │ authenticate()     │                    │
-     │                  │ ──────────────────►│                    │
-     │                  │                    │ intercambia code   │
-     │                  │                    │ por access_token   │
-     │                  │                    │ ──────────────────►│
-     │                  │                    │ access_token       │
-     │                  │                    │ ◄──────────────────│
-     │                  │                    │                    │
-     │                  │                    │ GET perfil usuario │
-     │                  │                    │ ──────────────────►│
-     │                  │                    │ { id, email,       │
-     │                  │                    │   nombre, foto }   │
-     │                  │                    │ ◄──────────────────│
-     │                  │                    │                    │
-     │                  │                    │ ejecuta passport.js│
-     │                  │                    │ findOne(googleId)  │
-     │                  │                    │ o crea usuario     │
-     │                  │                    │                    │
-     │                  │ req.user listo     │                    │
-     │                  │ ◄──────────────────│                    │
-     │                  │                    │                    │
-     │                  │ googleCallback()   │                    │
-     │                  │ jwt.sign(user._id) │                    │
-     │                  │                    │                    │
-     │ redirect frontend?token=JWT           │                    │
-     │ ◄───────────────  │                    │                    │
+```mermaid
+sequenceDiagram
+    actor Browser
+    participant Backend
+    participant Passport
+    participant Google
+
+    Browser->>Backend: GET /api/auth/google
+    Backend->>Passport: authenticate('google')
+    Passport-->>Browser: redirect → accounts.google.com
+
+    Note over Browser,Google: Usuario ve pantalla de Google y acepta permisos
+
+    Browser->>Google: Acepta permisos
+    Google->>Backend: GET /api/auth/google/callback?code=xxx
+
+    Backend->>Passport: authenticate('google')
+    Passport->>Google: intercambia code por access_token
+    Google-->>Passport: access_token
+    Passport->>Google: GET perfil del usuario
+    Google-->>Passport: { id, email, nombre, foto }
+
+    Note over Passport: Ejecuta passport.js:<br/>findOne(googleId) o crea usuario
+
+    Passport-->>Backend: req.user listo
+    Note over Backend: googleCallback()<br/>jwt.sign(user._id)
+    Backend-->>Browser: redirect → frontend?token=JWT
 ```
 
 ---
 
 ## Los tres escenarios de Google OAuth
 
-```
-┌─────────────────────────────────────────────────────────────────────┐
-│  Google devuelve profile { id, email, nombre, foto }                │
-│                                                                     │
-│  ¿Existe usuario con googleId = profile.id?                         │
-│                                                                     │
-│      SÍ ──────────────────────────────────────────────────────────► │
-│      devuelve el usuario tal cual (login normal)                    │
-│                                                                     │
-│      NO → ¿Existe usuario con ese email (registro manual previo)?   │
-│                                                                     │
-│             SÍ ─────────────────────────────────────────────────►  │
-│             vincula googleId a la cuenta existente                  │
-│             (account linking: ahora puede entrar con ambos métodos) │
-│                                                                     │
-│             NO ─────────────────────────────────────────────────►  │
-│             crea cuenta nueva con datos de Google                   │
-│             sin passwordHash (null)                                 │
-└─────────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    A[Google devuelve profile\n id, email, nombre, foto] --> B{¿Existe usuario\ncon googleId = profile.id?}
+
+    B -->|SÍ| C[Devuelve el usuario\nlogin normal]
+
+    B -->|NO| D{¿Existe usuario\ncon ese email?}
+
+    D -->|SÍ\nregistro manual previo| E[Account linking:\nvincula googleId a la cuenta existente\nAhora puede entrar con ambos métodos]
+
+    D -->|NO\nes completamente nuevo| F[Crea cuenta nueva\ncon datos de Google\npasswordHash = null]
+
+    C --> G[done con usuario → genera JWT]
+    E --> G
+    F --> G
 ```
 
 ---
@@ -538,12 +509,3 @@ http://localhost:3000/api/auth/google
 - `googleId` es el identificador de identidad OAuth, no el email. El email puede cambiar; el `googleId` es inmutable.
 - bcrypt con `SALT_ROUNDS = 12` hace el ataque de fuerza bruta computacionalmente inviable.
 - JWT sin sesiones en servidor (stateless). El logout es responsabilidad del cliente.
-
-```mermaid
-sequenceDiagram
-    Cliente->>Backend: POST /login
-    Backend->>MongoDB: findOne({ email })
-    MongoDB-->>Backend: usuario
-    Backend->>Backend: bcrypt.compare()
-    Backend-->>Cliente: { token, user }
-```
