@@ -538,3 +538,12 @@ http://localhost:3000/api/auth/google
 - `googleId` es el identificador de identidad OAuth, no el email. El email puede cambiar; el `googleId` es inmutable.
 - bcrypt con `SALT_ROUNDS = 12` hace el ataque de fuerza bruta computacionalmente inviable.
 - JWT sin sesiones en servidor (stateless). El logout es responsabilidad del cliente.
+
+```mermaid
+sequenceDiagram
+    Cliente->>Backend: POST /login
+    Backend->>MongoDB: findOne({ email })
+    MongoDB-->>Backend: usuario
+    Backend->>Backend: bcrypt.compare()
+    Backend-->>Cliente: { token, user }
+```
