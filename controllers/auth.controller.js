@@ -13,7 +13,7 @@ const generarToken = (userId) => {
 // ─── POST /api/auth/register ──────────────────
 exports.register = async (req, res) => {
     try {
-        const { email, password, nombre, apellido } = req.body;
+        const { email, password, nombre, apellido, role } = req.body;
 
         const existe = await User.findOne({ email });
         if (existe) {
@@ -24,7 +24,8 @@ exports.register = async (req, res) => {
             email,
             nombre,
             apellido,
-            passwordHash: password   // el pre-save middleware hashea esto
+            passwordHash: password,   // el pre-save middleware hashea esto
+            role: role || null
         });
 
         const token = generarToken(user._id);
@@ -73,8 +74,16 @@ exports.googleCallback = async (req, res) => {
         // req.user ya viene del middleware de Passport
         const token = generarToken(req.user._id);
 
+        // Recuperamos el rol que venía en el parámetro 'state' del flujo OAuth
+        const role = req.query.state || '';
+
+        // Si el usuario aún no tiene rol asignado, lo guardamos
+        if (role && !req.user.role) {
+            req.user.role = role;
+            await req.user.save();
+        }
+
         // Redirige al frontend con el token en query param
-        // En producción usa fragmento de URL (#) o una pantalla intermedia
         res.redirect(`${process.env.FRONTEND_URL}/auth/callback?token=${token}`);
 
     } catch (err) {

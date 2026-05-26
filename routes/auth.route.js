@@ -24,12 +24,15 @@ router.post('/logout', verifyToken, authController.logout);
 // ─────────────────────────────────────────────
 
 // GET /api/auth/google  → redirige a Google
-router.get('/google',
+router.get('/google', (req, res, next) => {
+  // Capturamos el rol del query param y lo enviamos a Google via 'state'
+  const role = req.query.role || '';
   passport.authenticate('google', {
     scope: ['openid', 'email', 'profile'],
-    session: false        // si usas JWT no necesitas sesión de Passport
-  })
-);
+    session: false,
+    state: role  // Google nos devuelve este valor en el callback
+  })(req, res, next);
+});
 
 // GET /api/auth/google/callback  → Google regresa aquí
 router.get('/google/callback',

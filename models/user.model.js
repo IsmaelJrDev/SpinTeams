@@ -36,6 +36,11 @@ const userSchema = new mongoose.Schema({
     type: String,
     unique: true,
     sparse: true
+  },
+  role: {
+    type: String,
+    enum: ['docente', 'alumno'],
+    default: null
   }
 }, {
   timestamps: true
